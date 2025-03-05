@@ -4,14 +4,26 @@ use Illuminate\Http\Request;
 
 define('LARAVEL_START', microtime(true));
 
-// Determine if the application is in maintenance mode...
-if (file_exists($maintenance = __DIR__.'/../storage/framework/maintenance.php')) {
-    require $maintenance;
+// Use /tmp for writable directories
+$tmpStoragePath = '/tmp/storage';
+if (!file_exists($tmpStoragePath)) {
+    mkdir($tmpStoragePath, 0777, true);
+}
+
+// Modify maintenance mode check
+$maintenanceFile = $tmpStoragePath . '/framework/maintenance.php';
+if (file_exists($maintenanceFile)) {
+    require $maintenanceFile;
 }
 
 // Register the Composer autoloader...
-require __DIR__.'/../vendor/autoload.php';
+require __DIR__ . '/../vendor/autoload.php';
 
-// Bootstrap Laravel and handle the request...
-(require_once __DIR__.'/../bootstrap/app.php')
-    ->handleRequest(Request::capture());
+// Bootstrap Laravel and handle the request with custom storage path
+$app = require_once __DIR__ . '/../bootstrap/app.php';
+
+// Set custom storage path
+$app->useStoragePath($tmpStoragePath);
+
+// Handle the request
+$app->handleRequest(Request::capture());

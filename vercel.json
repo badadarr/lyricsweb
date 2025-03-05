@@ -4,10 +4,6 @@
         {
             "src": "public/index.php",
             "use": "vercel-php@0.7.3"
-        },
-        {
-            "src": "public/**",
-            "use": "@vercel/static"
         }
     ],
     "routes": [
@@ -18,7 +14,6 @@
     ],
     "env": {
         "APP_ENV": "production",
-        "APP_DEBUG": "false",
-        "LOG_CHANNEL": "errorlog"
+        "APP_DEBUG": "false"
     }
 }
