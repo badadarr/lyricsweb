@@ -19,7 +19,5 @@
     "env": {
         "APP_ENV": "production",
         "APP_DEBUG": "false"
-    },
-    "buildCommand": "composer install --prefer-dist --no-dev && php artisan config:cache && php artisan route:cache",
-    "outputDirectory": "public"
+    }
 }
