@@ -210,14 +210,14 @@ class LyricsScraperController extends Controller
 
             // Konfigurasi client with better error handling
             $client = new Client([
-                'timeout' => 60,
-                'connect_timeout' => 10,
-                'verify' => false,
-                'http_errors' => false
+                'timeout' => 60, // Timeout in seconds
+                'connect_timeout' => 10, // Connection timeout in seconds
+                'verify' => false, // Disable SSL verification (not recommended for production)
+                'http_errors' => false // Do not throw exceptions on HTTP errors
             ]);
 
             try {
-                $response = $client->get('http://143.198.192.199:3000/lyrics', [
+                $response = $client->get('http://localhost:3000/lyrics', [
                     'query' => [
                         'title' => $title,
                         'artist' => $artist
@@ -379,6 +379,7 @@ class LyricsScraperController extends Controller
             ], 500);
         }
     }
+
     public function exportCsv($project_name)
     {
         // Cek apakah template tersedia
