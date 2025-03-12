@@ -205,12 +205,12 @@ class LyricsScraperController extends Controller
                 ], 409); // 409 Conflict
             }
 
-            // Konfigurasi client with better error handling
+            // Konfigurasi client dengan penanganan error yang lebih baik
             $client = new Client([
-                'timeout' => 60, // Timeout in seconds
-                'connect_timeout' => 10, // Connection timeout in seconds
-                'verify' => false, // Disable SSL verification (not recommended for production)
-                'http_errors' => false // Do not throw exceptions on HTTP errors
+                'timeout' => 600, // Meningkatkan timeout dari 60 ke 600 detik
+                'connect_timeout' => 60, // Meningkatkan connect timeout dari 5 ke 60 detik
+                'verify' => false,
+                'http_errors' => false
             ]);
 
             try {
@@ -327,7 +327,6 @@ class LyricsScraperController extends Controller
                         ]
                     ]);
                 } catch (\Exception $e) {
-
                     DB::rollBack();
 
                     Log::error('Error saving lyrics:', [
