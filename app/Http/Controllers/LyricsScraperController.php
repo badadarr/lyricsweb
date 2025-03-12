@@ -7,6 +7,7 @@ use App\Models\ProjectLyric;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -187,25 +188,21 @@ class LyricsScraperController extends Controller
                 ], 404);
             }
 
-            // Check if lyric already exists in database to avoid duplicate scraping
+            // Cek apakah data sudah ada
             $existingLyric = Lyric::where('title', $title)
                 ->where('artist', $artist)
-                ->where('project_name', $project_name)
                 ->first();
 
             if ($existingLyric) {
                 return response()->json([
-                    'success' => true,
-                    'message' => 'Lyrics already in database.',
-                    'data' => [
-                        'title' => $existingLyric->title,
-                        'artist' => $existingLyric->artist,
-                        'lyric' => $existingLyric->lyric,
-                        'language' => $existingLyric->language,
-                        'project_name' => $existingLyric->project_name,
-                        'source' => 'database'
+                    'success' => false,
+                    'message' => 'Lyrics already exist in the database.',
+                    'error_type' => 'duplicate',
+                    'details' => [
+                        'title' => $title,
+                        'artist' => $artist
                     ]
-                ]);
+                ], 409); // 409 Conflict
             }
 
             // Konfigurasi client with better error handling
@@ -281,7 +278,7 @@ class LyricsScraperController extends Controller
                 }
 
                 // Check if lyrics exist in response
-                if (!isset($data['lyrics']) || empty($data['lyrics'])) {
+                if (!isset($data['lyrics']['lyrics']) || empty($data['lyrics']['lyrics'])) {
                     Log::warning('No lyrics found in API response:', [
                         'title' => $title,
                         'artist' => $artist
@@ -299,19 +296,23 @@ class LyricsScraperController extends Controller
                 }
 
                 // Extract language info
-                $language = isset($data['language']) ? $data['language']['name'] : 'Unknown';
+                $language = isset($data['lyrics']['language']['name']) ? $data['lyrics']['language']['name'] : 'Unknown';
 
                 // Save to database with transaction
+                DB::beginTransaction();
+
                 try {
                     $lyric = new Lyric([
                         'title' => $title,
                         'artist' => $artist,
-                        'lyric' => $data['lyrics'],
+                        'lyric' => $data['lyrics']['lyrics'],
                         'language' => $language,
                         'project_name' => $project->project_name
                     ]);
 
                     $project->lyrics()->save($lyric);
+
+                    DB::commit();
 
                     return response()->json([
                         'success' => true,
@@ -319,14 +320,17 @@ class LyricsScraperController extends Controller
                         'data' => [
                             'title' => $title,
                             'artist' => $artist,
-                            'lyric' => $data['lyrics'],
+                            'lyric' => $data['lyrics']['lyrics'],
                             'language' => $language,
                             'project_name' => $project->project_name,
                             'source' => 'api'
                         ]
                     ]);
                 } catch (\Exception $e) {
-                    Log::error('Database error saving lyrics:', [
+
+                    DB::rollBack();
+
+                    Log::error('Error saving lyrics:', [
                         'error' => $e->getMessage(),
                         'title' => $title,
                         'artist' => $artist
@@ -338,7 +342,8 @@ class LyricsScraperController extends Controller
                         'error_type' => 'database',
                         'details' => [
                             'title' => $title,
-                            'artist' => $artist
+                            'artist' => $artist,
+                            'error' => $e->getMessage()
                         ]
                     ], 500);
                 }
