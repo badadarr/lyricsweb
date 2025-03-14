@@ -7,6 +7,7 @@ use App\Models\ProjectLyric;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -148,7 +149,7 @@ class LyricsScraperController extends Controller
         }
     }
 
-    public function processScrapeLyric(Request $request)
+        public function processScrapeLyric(Request $request)
     {
         try {
             // Log incoming request
@@ -383,6 +384,7 @@ class LyricsScraperController extends Controller
             ], 500);
         }
     }
+
     public function exportCsv($project_name)
     {
         // Cek apakah template tersedia
