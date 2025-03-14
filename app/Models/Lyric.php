@@ -17,6 +17,7 @@ class Lyric extends Model
         'title',
         'artist',
         'lyric',
+        'explicit',
         'language',
         'project_name',
     ];

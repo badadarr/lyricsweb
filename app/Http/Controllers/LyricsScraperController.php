@@ -149,7 +149,7 @@ class LyricsScraperController extends Controller
         }
     }
 
-    public function processScrapeLyric(Request $request)
+        public function processScrapeLyric(Request $request)
     {
         try {
             // Log incoming request
@@ -188,27 +188,32 @@ class LyricsScraperController extends Controller
                 ], 404);
             }
 
-            // Cek apakah data sudah ada
+            // Check if lyric already exists in database to avoid duplicate scraping
             $existingLyric = Lyric::where('title', $title)
                 ->where('artist', $artist)
+                ->where('project_name', $project_name)
                 ->first();
 
             if ($existingLyric) {
                 return response()->json([
-                    'success' => false,
-                    'message' => 'Lyrics already exist in the database.',
-                    'error_type' => 'duplicate',
-                    'details' => [
-                        'title' => $title,
-                        'artist' => $artist
+                    'success' => true,
+                    'message' => 'Lyrics already in database.',
+                    'data' => [
+                        'title' => $existingLyric->title,
+                        'artist' => $existingLyric->artist,
+                        'lyric' => $existingLyric->lyric,
+                        'language' => $existingLyric->language,
+                        'explicit' => $existingLyric->explicit,
+                        'project_name' => $existingLyric->project_name,
+                        'source' => 'database'
                     ]
-                ], 409); // 409 Conflict
+                ]);
             }
 
-            // Konfigurasi client dengan penanganan error yang lebih baik
+            // Konfigurasi client with better error handling
             $client = new Client([
-                'timeout' => 600, // Meningkatkan timeout dari 60 ke 600 detik
-                'connect_timeout' => 60, // Meningkatkan connect timeout dari 5 ke 60 detik
+                'timeout' => 60,
+                'connect_timeout' => 10,
                 'verify' => false,
                 'http_errors' => false
             ]);
@@ -278,7 +283,7 @@ class LyricsScraperController extends Controller
                 }
 
                 // Check if lyrics exist in response
-                if (!isset($data['lyrics']['lyrics']) || empty($data['lyrics']['lyrics'])) {
+                if (!isset($data['lyrics']) || empty($data['lyrics'])) {
                     Log::warning('No lyrics found in API response:', [
                         'title' => $title,
                         'artist' => $artist
@@ -296,23 +301,21 @@ class LyricsScraperController extends Controller
                 }
 
                 // Extract language info
-                $language = isset($data['lyrics']['language']['name']) ? $data['lyrics']['language']['name'] : 'Unknown';
+                $language = isset($data['lyrics']['language']) ? $data['lyrics']['language'] : 'Unknown';
+                $explicit = isset($data['lyrics']['explicit']) ? $data['lyrics']['explicit'] : false;
 
                 // Save to database with transaction
-                DB::beginTransaction();
-
                 try {
                     $lyric = new Lyric([
                         'title' => $title,
                         'artist' => $artist,
                         'lyric' => $data['lyrics']['lyrics'],
                         'language' => $language,
+                        'explicit' => $explicit,
                         'project_name' => $project->project_name
                     ]);
 
                     $project->lyrics()->save($lyric);
-
-                    DB::commit();
 
                     return response()->json([
                         'success' => true,
@@ -322,14 +325,13 @@ class LyricsScraperController extends Controller
                             'artist' => $artist,
                             'lyric' => $data['lyrics']['lyrics'],
                             'language' => $language,
+                            'explicit' => $explicit,
                             'project_name' => $project->project_name,
                             'source' => 'api'
                         ]
                     ]);
                 } catch (\Exception $e) {
-                    DB::rollBack();
-
-                    Log::error('Error saving lyrics:', [
+                    Log::error('Database error saving lyrics:', [
                         'error' => $e->getMessage(),
                         'title' => $title,
                         'artist' => $artist
@@ -341,8 +343,7 @@ class LyricsScraperController extends Controller
                         'error_type' => 'database',
                         'details' => [
                             'title' => $title,
-                            'artist' => $artist,
-                            'error' => $e->getMessage()
+                            'artist' => $artist
                         ]
                     ], 500);
                 }
@@ -409,6 +410,13 @@ class LyricsScraperController extends Controller
             $sheet->setCellValue("B{$row}", trim($lyric->artist));
             $sheet->setCellValue("C{$row}", trim($lyric->lyric));
             $sheet->setCellValue("D{$row}", trim($lyric->language));
+            $sheet->setCellValue("E{$row}", $lyric->explicit ? 'TRUE' : 'FALSE');
+            $sheet->setCellValue("F{$row}", ''); // Tag (kosong)
+            $sheet->setCellValue("G{$row}", ''); // Priority (kosong)
+            $sheet->setCellValue("H{$row}", ''); // Done Check (kosong)
+            $sheet->setCellValue("I{$row}", ''); // PIC (kosong)
+            $sheet->setCellValue("J{$row}", ''); // Done Publish (kosong)
+            $sheet->setCellValue("K{$row}", $lyric->created_at->format('Y-m-d')); // Tanggal Publish
 
             // Memastikan lirik tetap rapi dengan wrap text
             $sheet->getStyle("C{$row}")->getAlignment()->setWrapText(true);

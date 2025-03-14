@@ -19,13 +19,13 @@ return new class extends Migration {
             $table->text('lyric');
             $table->string('project_name'); // FK ke project_lyrics
             $table->string('language')->nullable(); // Kolom baru untuk bahasa
+            $table->boolean('explicit')->default(false); // Kolom baru untuk konten dewasa
             $table->softDeletes(); // Kolom deleted_at untuk soft delete
             $table->timestamps();
 
             // Foreign key constraints
             $table->foreign('project_name')->references('project_name')->on('project_lyrics')->onDelete('cascade');
             $table->foreignId('user_id')->nullable()->constrained('users');
-
         });
     }
 
