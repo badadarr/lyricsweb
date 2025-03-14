@@ -202,6 +202,7 @@ class LyricsScraperController extends Controller
                         'artist' => $existingLyric->artist,
                         'lyric' => $existingLyric->lyric,
                         'language' => $existingLyric->language,
+                        'explicit' => $existingLyric->explicit,
                         'project_name' => $existingLyric->project_name,
                         'source' => 'database'
                     ]
@@ -217,7 +218,7 @@ class LyricsScraperController extends Controller
             ]);
 
             try {
-                $response = $client->get('http://143.198.192.199:3000/lyrics', [
+                $response = $client->get('http://localhost:3000/lyrics', [
                     'query' => [
                         'title' => $title,
                         'artist' => $artist
@@ -299,15 +300,17 @@ class LyricsScraperController extends Controller
                 }
 
                 // Extract language info
-                $language = isset($data['language']) ? $data['language']['name'] : 'Unknown';
+                $language = isset($data['lyrics']['language']) ? $data['lyrics']['language'] : 'Unknown';
+                $explicit = isset($data['lyrics']['explicit']) ? $data['lyrics']['explicit'] : false;
 
                 // Save to database with transaction
                 try {
                     $lyric = new Lyric([
                         'title' => $title,
                         'artist' => $artist,
-                        'lyric' => $data['lyrics'],
+                        'lyric' => $data['lyrics']['lyrics'],
                         'language' => $language,
+                        'explicit' => $explicit,
                         'project_name' => $project->project_name
                     ]);
 
@@ -319,8 +322,9 @@ class LyricsScraperController extends Controller
                         'data' => [
                             'title' => $title,
                             'artist' => $artist,
-                            'lyric' => $data['lyrics'],
+                            'lyric' => $data['lyrics']['lyrics'],
                             'language' => $language,
+                            'explicit' => $explicit,
                             'project_name' => $project->project_name,
                             'source' => 'api'
                         ]
@@ -404,6 +408,13 @@ class LyricsScraperController extends Controller
             $sheet->setCellValue("B{$row}", trim($lyric->artist));
             $sheet->setCellValue("C{$row}", trim($lyric->lyric));
             $sheet->setCellValue("D{$row}", trim($lyric->language));
+            $sheet->setCellValue("E{$row}", $lyric->explicit ? 'TRUE' : 'FALSE');
+            $sheet->setCellValue("F{$row}", ''); // Tag (kosong)
+            $sheet->setCellValue("G{$row}", ''); // Priority (kosong)
+            $sheet->setCellValue("H{$row}", ''); // Done Check (kosong)
+            $sheet->setCellValue("I{$row}", ''); // PIC (kosong)
+            $sheet->setCellValue("J{$row}", ''); // Done Publish (kosong)
+            $sheet->setCellValue("K{$row}", $lyric->created_at->format('Y-m-d')); // Tanggal Publish
 
             // Memastikan lirik tetap rapi dengan wrap text
             $sheet->getStyle("C{$row}")->getAlignment()->setWrapText(true);

@@ -110,28 +110,27 @@
 
                 // Create the accordion item with appropriate styling
                 const item = `
-                                <div class="accordion-item">
-                                    <h2 class="accordion-header" id="heading${index}">
-                                        <button class="${headerClass}" type="button" data-bs-toggle="collapse" 
-                                            data-bs-target="#collapse${index}" aria-expanded="false" 
-                                            aria-controls="collapse${index}">
-                                            <strong>${title}</strong> - ${artist}
-                                            ${statusBadge}
-                                        </button>
-                                    </h2>
-                                    <div id="collapse${index}" class="accordion-collapse collapse" 
-                                        aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
-                                        <div class="accordion-body">
-                                            ${language && status === 'success' ? `<div class="mb-2"><strong>Language:</strong> <span class="badge bg-info">${language}</span></div>` : ''}
-                                            <pre style="white-space: pre-wrap;">${lyric}</pre>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
+                <div class="accordion-item">
+                    <h2 class="accordion-header" id="heading${index}">
+                        <button class="${headerClass}" type="button" data-bs-toggle="collapse" 
+                            data-bs-target="#collapse${index}" aria-expanded="false" 
+                            aria-controls="collapse${index}">
+                            <strong>${title}</strong> - ${artist}
+                            ${statusBadge}
+                        </button>
+                    </h2>
+                    <div id="collapse${index}" class="accordion-collapse collapse" 
+                        aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
+                        <div class="accordion-body">
+                            ${language && status === 'success' ? `<div class="mb-2"><strong>Language:</strong> <span class="badge bg-info">${language}</span></div>` : ''}
+                            <pre style="white-space: pre-wrap;">${lyric}</pre>
+                        </div>
+                    </div>
+                </div>
+            `;
                 lyricsAccordion.append(item);
             }
 
-            // Process button click handler
             processBtn.click(async function (e) {
                 e.preventDefault();
                 console.log('Process button clicked');
@@ -147,6 +146,20 @@
                         text: 'Silakan masukkan data lagu yang akan di-scrape.'
                     });
                     return;
+                }
+
+                // Konfirmasi sebelum memproses
+                const confirmation = await Swal.fire({
+                    title: 'Konfirmasi Input',
+                    text: 'Apakah Anda yakin input sudah benar? Format yang benar adalah "Judul Lagu, Nama Artis".',
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Proses',
+                    cancelButtonText: 'Batal'
+                });
+
+                if (!confirmation.isConfirmed) {
+                    return; // Jika pengguna membatalkan, hentikan pemrosesan
                 }
 
                 // Clear previous results
@@ -191,8 +204,18 @@
                             continue;
                         }
 
-                        const title = parts[0].trim();
-                        const artist = parts[1].trim();
+                        let title = parts[0].trim();
+                        let artist = parts[1].trim();
+
+                        // Validate and adjust input format if necessary
+                        if (isLikelyArtistFirst(title, artist)) {
+                            [title, artist] = [artist, title];
+                        }
+
+                        // Capitalize the first letter of each word
+                        title = capitalizeWords(title);
+                        artist = capitalizeWords(artist);
+
                         console.log('Processing:', title, artist);
 
                         try {
@@ -307,11 +330,11 @@
 
                         // Create summary message
                         let summaryHtml = `
-                                        <div class="text-start">
-                                            <h5>Summary:</h5>
-                                            <ul>
-                                                <li class="text-success">Successfully scraped: ${successCount} songs</li>
-                                    `;
+                        <div class="text-start">
+                            <h5>Summary:</h5>
+                            <ul>
+                                <li class="text-success">Successfully scraped: ${successCount} songs</li>
+                    `;
 
                         // Only show error types that exist
                         if (errorByTypes.not_found > 0) {
@@ -331,10 +354,10 @@
                         }
 
                         summaryHtml += `
-                                            </ul>
-                                            ${errorCount > 0 ? '<p>Please check the details for each song with errors below.</p>' : ''}
-                                        </div>
-                                    `;
+                            </ul>
+                            ${errorCount > 0 ? '<p>Please check the details for each song with errors below.</p>' : ''}
+                        </div>
+                    `;
 
                         // Display summary
                         Swal.fire({
@@ -345,6 +368,27 @@
                     }
                 }
             });
+
+            // Function to determine if the input is likely in "Artist, Title" format
+            function isLikelyArtistFirst(title, artist) {
+                // Check if the first part is a single word or a common artist name pattern
+                const artistPattern = /^[A-Z][a-z]+(?: [A-Z][a-z]+)*$/;
+                const titlePattern = /^[A-Z][a-z]+(?: [A-Za-z]+)*$/;
+
+                // Check if the first part is shorter than the second part (common in artist, title format)
+                const isArtistShorter = title.length < artist.length;
+
+                // Check if the first part contains common punctuation marks that are less likely in artist names
+                const hasPunctuation = /[.,!?;:]/.test(title);
+
+                // Combine all checks
+                return artistPattern.test(title) && titlePattern.test(artist) && isArtistShorter && !hasPunctuation;
+            }
+
+            // Function to capitalize the first letter of each word
+            function capitalizeWords(str) {
+                return str.replace(/\b\w/g, char => char.toUpperCase());
+            }
 
             // Export to CSV functionality
             exportBtn.click(function (e) {
