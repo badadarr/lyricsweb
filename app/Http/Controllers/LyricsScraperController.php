@@ -8,7 +8,11 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Style\Alignment;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Yajra\DataTables\DataTables;
 
@@ -211,14 +215,18 @@ class LyricsScraperController extends Controller
 
             // Konfigurasi client with better error handling
             $client = new Client([
-                'timeout' => 60,
-                'connect_timeout' => 10,
+                'timeout' => 480, // 8 menit
+                'connect_timeout' => 120, // 2 menit untuk koneksi awal
                 'verify' => false,
-                'http_errors' => false
+                'http_errors' => false,
             ]);
 
+            // http://143.198.192.199:3000/lyrics
+            // http://localhost:3000/lyrics
+            $API_URL_PUBLISH = 'http://143.198.192.199:3000/lyrics';
+            $API_URL_LOCAL = 'http://localhost:3000/lyrics';
             try {
-                $response = $client->get('http://localhost:3000/lyrics', [
+                $response = $client->get($API_URL_LOCAL, [
                     'query' => [
                         'title' => $title,
                         'artist' => $artist
@@ -302,6 +310,7 @@ class LyricsScraperController extends Controller
                 // Extract language info
                 $language = isset($data['lyrics']['language']) ? $data['lyrics']['language'] : 'Unknown';
                 $explicit = isset($data['lyrics']['explicit']) ? $data['lyrics']['explicit'] : false;
+                $source = isset($data['source']) ? $data['source'] : 'Unknown'; // Extract source
 
                 // Save to database with transaction
                 try {
@@ -311,7 +320,8 @@ class LyricsScraperController extends Controller
                         'lyric' => $data['lyrics']['lyrics'],
                         'language' => $language,
                         'explicit' => $explicit,
-                        'project_name' => $project->project_name
+                        'project_name' => $project->project_name,
+                        'source' => $source // Save source to database
                     ]);
 
                     $project->lyrics()->save($lyric);
@@ -326,8 +336,8 @@ class LyricsScraperController extends Controller
                             'language' => $language,
                             'explicit' => $explicit,
                             'project_name' => $project->project_name,
-                            'source' => 'api'
-                        ]
+                            'source' => $source // Return source in response
+                        ],
                     ]);
                 } catch (\Exception $e) {
                     Log::error('Database error saving lyrics:', [
@@ -402,13 +412,18 @@ class LyricsScraperController extends Controller
             return back()->with('error', 'No lyrics found for this project.');
         }
 
+        Log::info('Lyrics data:', $lyrics->toArray());
+
+        // Daftar bahasa yang valid
+        $validLanguages = ['ID', 'EN', 'KR', 'JP']; // Ganti dengan daftar bahasa Anda
+
         $row = 2; // Data dimulai dari baris kedua (baris pertama adalah header)
         foreach ($lyrics as $lyric) {
             $sheet->setCellValue("A{$row}", trim($lyric->title));
             $sheet->setCellValue("B{$row}", trim($lyric->artist));
             $sheet->setCellValue("C{$row}", trim($lyric->lyric));
-            $sheet->setCellValue("D{$row}", trim($lyric->language));
-            $sheet->setCellValue("E{$row}", $lyric->explicit ? 'TRUE' : 'FALSE');
+            $sheet->setCellValue("D{$row}", strtoupper(trim($lyric->language)));
+            $sheet->setCellValue("E{$row}", $lyric->explicit ? 1 : 0); // Set 1 if true, 0 if false
             $sheet->setCellValue("F{$row}", ''); // Tag (kosong)
             $sheet->setCellValue("G{$row}", ''); // Priority (kosong)
             $sheet->setCellValue("H{$row}", ''); // Done Check (kosong)
@@ -418,9 +433,36 @@ class LyricsScraperController extends Controller
 
             // Memastikan lirik tetap rapi dengan wrap text
             $sheet->getStyle("C{$row}")->getAlignment()->setWrapText(true);
+            $sheet->getStyle("C{$row}")->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
+            $sheet->getStyle("C{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
+
+            // Data validation untuk kolom language
+            $validation = $sheet->getDataValidation("D{$row}");
+            $validation->setType(DataValidation::TYPE_LIST);
+            $validation->setErrorStyle(DataValidation::STYLE_INFORMATION);
+            $validation->setAllowBlank(false);
+            $validation->setShowInputMessage(true);
+            $validation->setShowErrorMessage(true);
+            $validation->setPromptTitle('Select Language');
+            $validation->setPrompt('Please select a language from the list.');
+            $validation->setErrorTitle('Invalid Input');
+            $validation->setError('Please select a valid language from the dropdown list.');
+            $validation->setFormula1('"' . implode(',', $validLanguages) . '"');
+
+            Log::info("Writing row {$row}: ", [
+                'title' => $lyric->title,
+                'artist' => $lyric->artist,
+                'lyric' => $lyric->lyric,
+                'language' => $lyric->language,
+                'explicit' => $lyric->explicit,
+                'created_at' => $lyric->created_at->format('Y-m-d')
+            ]);
 
             $row++;
         }
+
+        // Atur lebar kolom C secara otomatis
+        $sheet->getColumnDimension('C')->setAutoSize(true);
 
         // Buat folder penyimpanan jika belum ada
         $exportPath = storage_path('app/public/exports/');

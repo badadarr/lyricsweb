@@ -47,6 +47,10 @@
                                             <div class="mb-2">
                                                 <strong>Language:</strong>
                                                 <span class="badge bg-info">{{ $lyric->language ?? 'Unknown' }}</span>
+                                                <strong>Source:</strong>
+                                                <span class="badge bg-secondary">{{ $lyric->source ?? 'Unknown' }}</span>
+                                                <strong>Explicit:</strong>
+                                                <span class="badge bg-warning">{{ $lyric->explicit ? 'Yes' : 'No' }}</span>
                                             </div>
                                             <pre style="white-space: pre-wrap;">{{ $lyric->lyric }}</pre>
                                         </div>
@@ -60,6 +64,7 @@
         </div>
     </div>
 @endsection
+
 @section('foot')
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://cdn.datatables.net/1.11.5/js/jquery.dataTables.min.js"></script>
@@ -89,7 +94,7 @@
             processBtn.after(progressBar);
 
             // Function to add items to the accordion with status-based styling
-            function addItemToAccordion(title, artist, lyric, index, status = 'success', language = null) {
+            function addItemToAccordion(title, artist, lyric, index, status = 'success', language = null, source = null, explicit = false) {
                 // Status-based styling for different outcomes
                 let headerClass = 'accordion-button collapsed';
                 let statusBadge = '';
@@ -110,24 +115,31 @@
 
                 // Create the accordion item with appropriate styling
                 const item = `
-                <div class="accordion-item">
-                    <h2 class="accordion-header" id="heading${index}">
-                        <button class="${headerClass}" type="button" data-bs-toggle="collapse" 
-                            data-bs-target="#collapse${index}" aria-expanded="false" 
-                            aria-controls="collapse${index}">
-                            <strong>${title}</strong> - ${artist}
-                            ${statusBadge}
-                        </button>
-                    </h2>
-                    <div id="collapse${index}" class="accordion-collapse collapse" 
-                        aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
-                        <div class="accordion-body">
-                            ${language && status === 'success' ? `<div class="mb-2"><strong>Language:</strong> <span class="badge bg-info">${language}</span></div>` : ''}
-                            <pre style="white-space: pre-wrap;">${lyric}</pre>
-                        </div>
-                    </div>
-                </div>
-            `;
+                                    <div class="accordion-item">
+                                        <h2 class="accordion-header" id="heading${index}">
+                                            <button class="${headerClass}" type="button" data-bs-toggle="collapse" 
+                                                data-bs-target="#collapse${index}" aria-expanded="false" 
+                                                aria-controls="collapse${index}">
+                                                <strong>${title}</strong> - ${artist}
+                                                ${statusBadge}
+                                            </button>
+                                        </h2>
+                                        <div id="collapse${index}" class="accordion-collapse collapse" 
+                                            aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
+                                            <div class="accordion-body">
+                                                <div class="mb-2">
+                                                    <strong>Language:</strong>
+                                                    <span class="badge bg-info">${language ?? 'Unknown'}</span>
+                                                    <strong>Source:</strong>
+                                                    <span class="badge bg-secondary">${source ?? 'Unknown'}</span>
+                                                    <strong>Explicit:</strong>
+                                                    <span class="badge bg-warning">${explicit ? 'Yes' : 'No'}</span>
+                                                </div>
+                                                <pre style="white-space: pre-wrap;">${lyric}</pre>
+                                            </div>
+                                        </div>
+                                    </div>
+                                `;
                 lyricsAccordion.append(item);
             }
 
@@ -244,7 +256,9 @@
                                     data.data.lyric,
                                     results.length - 1,
                                     'success',
-                                    data.data.language
+                                    data.data.language,
+                                    data.data.source, // Tambahkan source di sini
+                                    data.data.explicit
                                 );
                             } else {
                                 // Error case
@@ -330,11 +344,11 @@
 
                         // Create summary message
                         let summaryHtml = `
-                        <div class="text-start">
-                            <h5>Summary:</h5>
-                            <ul>
-                                <li class="text-success">Successfully scraped: ${successCount} songs</li>
-                    `;
+                                                    <div class="text-start">
+                                                        <h5>Summary:</h5>
+                                                        <ul>
+                                                            <li class="text-success">Successfully scraped: ${successCount} songs</li>
+                                                `;
 
                         // Only show error types that exist
                         if (errorByTypes.not_found > 0) {
@@ -354,10 +368,10 @@
                         }
 
                         summaryHtml += `
-                            </ul>
-                            ${errorCount > 0 ? '<p>Please check the details for each song with errors below.</p>' : ''}
-                        </div>
-                    `;
+                                                        </ul>
+                                                        ${errorCount > 0 ? '<p>Please check the details for each song with errors below.</p>' : ''}
+                                                    </div>
+                                                `;
 
                         // Display summary
                         Swal.fire({
