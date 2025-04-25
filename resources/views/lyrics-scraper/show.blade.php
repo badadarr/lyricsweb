@@ -12,21 +12,25 @@
                         </a>
                     </div>
                     <div class="card-body">
-                        <!-- Form untuk Bulk Scraping -->
-                        <div class="mb-4">
-                            <h6>Lyrics Scraper</h6>
-                            <p>Masukkan setiap pasangan Title dan Artist dalam satu baris, dipisahkan dengan
-                                koma.<br>Contoh: <code>Judul Lagu, Nama Artis</code></p>
-                            <textarea id="bulkInput" class="form-control" placeholder="Judul Lagu, Nama Artis"
-                                rows="4"></textarea><br>
-                            <button id="processBtn" class="btn btn-primary">Proses</button>
-                            <a id="exportBtn"
-                                href="{{ route('lyrics.export', ['project_name' => $project->project_name]) }}"
-                                class="btn btn-success">
-                                Export CSV
-                            </a>
+                        {{-- Tombol untuk export ke excel --}}
+                        <a id="exportBtn" class="btn btn-primary btn-sm mb-4"
+                            href="{{ route('lyrics.export', ['project_name' => $project->project_name]) }}"
+                            class="btn btn-success">
+                            Export CSV
+                        </a>
+                        {{-- Tombol Add Lyrics --}}
+                        <button type="button" class="btn btn-success btn-sm mb-4" data-bs-toggle="modal"
+                            data-bs-target="#inputModal">
+                            <i class="bi bi-plus-circle"></i> Add Lyrics
+                        </button>
+                        <!-- Progress Bar Container -->
+                        <div id="progressContainer" style="display: none; margin: 15px 0;">
+                            <div class="progress">
+                                <div id="mainProgressBar" class="progress-bar progress-bar-striped progress-bar-animated"
+                                    role="progressbar" style="width: 0%"></div>
+                            </div>
+                            <small id="progressText" class="text-muted">Memproses data...</small>
                         </div>
-
                         <!-- Accordion untuk Menampilkan Lyrics -->
                         <div class="accordion" id="lyricsAccordion">
                             @foreach ($lyrics as $index => $lyric)
@@ -35,22 +39,32 @@
                                         <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
                                             data-bs-target="#collapse{{ $index }}" aria-expanded="false"
                                             aria-controls="collapse{{ $index }}">
-                                            <strong>{{ $lyric->title }}</strong> - {{ $lyric->artist }}
-                                            @if($lyric->language)
+                                            <strong>{{ $lyric->title }}</strong> - {{ $lyric->artist }} (
+                                            @if($lyric->language && $lyric->source)
+                                                <span class="badge bg-secondary ms-2">{{ $lyric->source }}</span>
                                                 <span class="badge bg-info ms-2">{{ $lyric->language }}</span>
                                             @endif
+                                            <span
+                                                class="badge bg-warning ms-2">{{ $lyric->explicit ? 'Explicit' : 'Clean' }}</span>
+                                            )
                                         </button>
                                     </h2>
                                     <div id="collapse{{ $index }}" class="accordion-collapse collapse"
                                         aria-labelledby="heading{{ $index }}" data-bs-parent="#lyricsAccordion">
                                         <div class="accordion-body">
                                             <div class="mb-2">
-                                                <strong>Language:</strong>
-                                                <span class="badge bg-info">{{ $lyric->language ?? 'Unknown' }}</span>
-                                                <strong>Source:</strong>
-                                                <span class="badge bg-secondary">{{ $lyric->source ?? 'Unknown' }}</span>
-                                                <strong>Explicit:</strong>
-                                                <span class="badge bg-warning">{{ $lyric->explicit ? 'Yes' : 'No' }}</span>
+                                                {{-- <strong>Explicit:</strong>
+                                                <span class="badge bg-warning">{{ $lyric->explicit ? 'Yes' : 'No' }}</span> --}}
+                                                <strong>PIC:</strong>
+                                                <span class="badge bg-warning">{{ $lyric->pic ?? 'Unknown'}}</span>
+                                                <strong>Done Check:</strong>
+                                                <span class="badge bg-warning">{{ $lyric->done_publish ? 'Yes' : 'No' }}</span>
+                                                <strong>Tag:</strong>
+                                                <span class="badge bg-warning">{{ $lyric->tag ?? 'Unknown' }}</span>
+                                                <button class="btn btn-danger btn-sm float-end delete-btn"
+                                                    data-id="{{ $lyric->id }}">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
                                             </div>
                                             <pre style="white-space: pre-wrap;">{{ $lyric->lyric }}</pre>
                                         </div>
@@ -63,6 +77,7 @@
             </div>
         </div>
     </div>
+    @include('lyrics-scraper.components.modal-add-lyrics')
 @endsection
 
 @section('foot')
@@ -77,81 +92,26 @@
     <script src="{{ asset('vendor/route.js') }}"></script>
     <script>
         $(document).ready(function () {
+
             // Identify key elements
-            const processBtn = $('#processBtn');
             const exportBtn = $('#exportBtn');
-            const bulkInput = $('#bulkInput');
+            const deleteBtn = $('.delete-btn');
+            const processModalBtn = $('#processModalBtn');
+            const addLyricsForm = $('#addLyricsForm');
+            const progressContainer = $('#progressContainer');
+            const progressBar = $('#mainProgressBar');
+            const progressText = $('#progressText');
             const lyricsAccordion = $('#lyricsAccordion');
             let results = [];
 
-            // Console log to verify elements are found
-            console.log('Process button:', processBtn.length);
-            console.log('Bulk input:', bulkInput.length);
-            console.log('Lyrics accordion:', lyricsAccordion.length);
+            processModalBtn.after(progressBar);
 
-            // Add progress bar
-            let progressBar = $('<div class="progress mb-3" style="display: none;"><div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div></div>');
-            processBtn.after(progressBar);
-
-            // Function to add items to the accordion with status-based styling
-            function addItemToAccordion(title, artist, lyric, index, status = 'success', language = null, source = null, explicit = false) {
-                // Status-based styling for different outcomes
-                let headerClass = 'accordion-button collapsed';
-                let statusBadge = '';
-
-                if (status === 'not-found' || status === 'not_found') {
-                    statusBadge = '<span class="badge bg-warning ms-2">Not Found</span>';
-                } else if (status === 'api-error' || status === 'api_error') {
-                    statusBadge = '<span class="badge bg-danger ms-2">API Error</span>';
-                } else if (status === 'general' || status === 'error') {
-                    statusBadge = '<span class="badge bg-danger ms-2">Error</span>';
-                } else if (status === 'connection') {
-                    statusBadge = '<span class="badge bg-danger ms-2">Connection Error</span>';
-                } else if (status === 'database') {
-                    statusBadge = '<span class="badge bg-danger ms-2">Database Error</span>';
-                } else if (language) {
-                    statusBadge = `<span class="badge bg-info ms-2">${language}</span>`;
-                }
-
-                // Create the accordion item with appropriate styling
-                const item = `
-                                    <div class="accordion-item">
-                                        <h2 class="accordion-header" id="heading${index}">
-                                            <button class="${headerClass}" type="button" data-bs-toggle="collapse" 
-                                                data-bs-target="#collapse${index}" aria-expanded="false" 
-                                                aria-controls="collapse${index}">
-                                                <strong>${title}</strong> - ${artist}
-                                                ${statusBadge}
-                                            </button>
-                                        </h2>
-                                        <div id="collapse${index}" class="accordion-collapse collapse" 
-                                            aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
-                                            <div class="accordion-body">
-                                                <div class="mb-2">
-                                                    <strong>Language:</strong>
-                                                    <span class="badge bg-info">${language ?? 'Unknown'}</span>
-                                                    <strong>Source:</strong>
-                                                    <span class="badge bg-secondary">${source ?? 'Unknown'}</span>
-                                                    <strong>Explicit:</strong>
-                                                    <span class="badge bg-warning">${explicit ? 'Yes' : 'No'}</span>
-                                                </div>
-                                                <pre style="white-space: pre-wrap;">${lyric}</pre>
-                                            </div>
-                                        </div>
-                                    </div>
-                                `;
-                lyricsAccordion.append(item);
-            }
-
-            processBtn.click(async function (e) {
+            // Handle tombol proses di modal
+            $('#processModalBtn').click(function (e) {
                 e.preventDefault();
-                console.log('Process button clicked');
 
-                // Parse input lines
-                const lines = bulkInput.val().split('\n').filter(line => line.trim());
-                console.log('Input lines:', lines);
-
-                if (!lines.length) {
+                const bulkInput = $('#bulkInputModal').val().trim();
+                if (!bulkInput) {
                     Swal.fire({
                         icon: 'warning',
                         title: 'Input Kosong',
@@ -160,227 +120,245 @@
                     return;
                 }
 
-                // Konfirmasi sebelum memproses
-                const confirmation = await Swal.fire({
+                Swal.fire({
                     title: 'Konfirmasi Input',
                     text: 'Apakah Anda yakin input sudah benar? Format yang benar adalah "Judul Lagu, Nama Artis".',
                     icon: 'warning',
                     showCancelButton: true,
                     confirmButtonText: 'Ya, Proses',
                     cancelButtonText: 'Batal'
-                });
+                }).then((result) => {
+                    if (!result.isConfirmed) return;
 
-                if (!confirmation.isConfirmed) {
-                    return; // Jika pengguna membatalkan, hentikan pemrosesan
-                }
+                    // Sembunyikan modal dan tampilkan progress bar
+                    $('#inputModal').modal('hide');
+                    showProgressBar();
 
-                // Clear previous results
-                results = [];
-                lyricsAccordion.empty();
-
-                // Setup progress tracking
-                const totalLines = lines.length;
-                let completedLines = 0;
-                progressBar.show();
-                progressBar.find('.progress-bar').css('width', '0%');
-
-                // Disable process button and hide export button
-                processBtn.text('Processing...').prop('disabled', true);
-                exportBtn.hide();
-
-                try {
-                    for (let i = 0; i < lines.length; i++) {
-                        const parts = lines[i].split(',');
-                        if (parts.length < 2) {
-                            console.log('Invalid line format:', lines[i]);
-                            results.push({
-                                title: lines[i],
-                                artist: 'Invalid Format',
-                                lyric: 'Error: Format input harus "Judul Lagu, Nama Artis"',
-                                status: 'error'
-                            });
-
-                            addItemToAccordion(
-                                lines[i],
-                                'Invalid Format',
-                                'Error: Format input harus "Judul Lagu, Nama Artis"',
-                                results.length - 1,
-                                'error'
-                            );
-
-                            // Update progress
-                            completedLines++;
-                            const progressPercent = Math.round((completedLines / totalLines) * 100);
-                            progressBar.find('.progress-bar').css('width', `${progressPercent}%`);
-
-                            continue;
-                        }
-
-                        let title = parts[0].trim();
-                        let artist = parts[1].trim();
-
-                        // Validate and adjust input format if necessary
-                        if (isLikelyArtistFirst(title, artist)) {
-                            [title, artist] = [artist, title];
-                        }
-
-                        // Capitalize the first letter of each word
-                        title = capitalizeWords(title);
-                        artist = capitalizeWords(artist);
-
-                        console.log('Processing:', title, artist);
-
-                        try {
-                            const response = await fetch(`/lyrics/scraper/process?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}&project_name=${encodeURIComponent(projectName)}`, {
-                                method: 'GET',
-                                headers: {
-                                    'Accept': 'application/json',
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                    'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                    // Kirim data ke server
+                    $.ajax({
+                        url: $('#addLyricsForm').attr('action'),
+                        method: 'POST',
+                        data: $('#addLyricsForm').serialize(),
+                        headers: {
+                            'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
+                        },
+                        xhr: function () {
+                            const xhr = new window.XMLHttpRequest();
+                            xhr.addEventListener('progress', function (e) {
+                                if (e.lengthComputable) {
+                                    const percent = Math.round((e.loaded / e.total) * 90);
+                                    updateProgressBar(percent, 'Mengunggah data...');
                                 }
                             });
+                            return xhr;
+                        },
+                        beforeSend: function () {
+                            updateProgressBar(10, 'Memulai proses...');
+                        },
+                        success: function (response) {
+                            updateProgressBar(100, 'Proses selesai!');
 
-                            const data = await response.json();
-                            console.log('Response:', data);
-
-                            if (data.success) {
-                                // Success case
-                                results.push({
-                                    ...data.data,
-                                    status: 'success'
+                            // Tambahkan hasil ke accordion
+                            if (response.data && response.data.length > 0) {
+                                const existingCount = $('.accordion-item').length;
+                                response.data.forEach((lyric, index) => {
+                                    addItemToAccordion(
+                                        lyric.title,
+                                        lyric.artist,
+                                        lyric.lyric,
+                                        existingCount + index,
+                                        'success',
+                                        lyric.language,
+                                        lyric.source,
+                                        lyric.explicit,
+                                        lyric.tag,
+                                        lyric.priority,
+                                        lyric.done_publish,
+                                        lyric.pic
+                                    );
                                 });
-
-                                addItemToAccordion(
-                                    data.data.title,
-                                    data.data.artist,
-                                    data.data.lyric,
-                                    results.length - 1,
-                                    'success',
-                                    data.data.language,
-                                    data.data.source, // Tambahkan source di sini
-                                    data.data.explicit
-                                );
-                            } else {
-                                // Error case
-                                const errorMessage = data.message || 'Unknown error';
-                                const errorDetails = data.details ? `\n\nDetails: ${JSON.stringify(data.details)}` : '';
-                                const errorType = data.error_type || 'general';
-
-                                results.push({
-                                    title,
-                                    artist,
-                                    lyric: `Error: ${errorMessage}${errorDetails}`,
-                                    status: errorType
-                                });
-
-                                addItemToAccordion(
-                                    title,
-                                    artist,
-                                    `Error: ${errorMessage}${errorDetails}`,
-                                    results.length - 1,
-                                    errorType
-                                );
                             }
-                        } catch (err) {
-                            console.error('Error processing line:', err);
 
-                            results.push({
-                                title,
-                                artist,
-                                lyric: `Error: ${err.message}`,
-                                status: 'connection'
-                            });
-
-                            addItemToAccordion(
-                                title,
-                                artist,
-                                `Error: ${err.message}`,
-                                results.length - 1,
-                                'connection'
-                            );
-                        } finally {
-                            // Update progress
-                            completedLines++;
-                            const progressPercent = Math.round((completedLines / totalLines) * 100);
-                            progressBar.find('.progress-bar').css('width', `${progressPercent}%`);
+                            // Tampilkan notifikasi
+                            showResultNotification(response);
+                        },
+                        error: function (xhr) {
+                            updateProgressBar(0, 'Error terjadi!');
+                            showErrorNotification(xhr);
+                        },
+                        complete: function () {
+                            setTimeout(hideProgressBar, 1500);
                         }
-                    }
-                } catch (err) {
-                    console.error('Main process error:', err);
+                    });
+                });
+            });
+            // Fungsi-fungsi pendukung
+            function showProgressBar() {
+                progressContainer.slideDown();
+                progressBar.css('width', '0%');
+                progressText.text('Memproses data...');
+            }
+
+            function updateProgressBar(percent, text) {
+                progressBar.css('width', percent + '%');
+                if (text) progressText.text(text);
+            }
+
+            function hideProgressBar() {
+                progressContainer.slideUp();
+                progressBar.css('width', '0%');
+            }
+
+            function showResultNotification(response) {
+                let successMsg = `Berhasil memproses ${response.success_count} lagu`;
+                if (response.error_count > 0) {
+                    successMsg += `, dengan ${response.error_count} error`;
+                }
+
+                if (response.errors?.length > 0) {
+                    let errorDetails = response.errors.join('<br>');
+                    if (errorDetails.length > 500) errorDetails = errorDetails.substring(0, 500) + '...';
 
                     Swal.fire({
-                        icon: 'error',
-                        title: 'Error',
-                        text: 'Terjadi kesalahan saat memproses data. Silakan coba lagi.'
+                        icon: response.success_count > 0 ? 'info' : 'error',
+                        title: response.success_count > 0 ? 'Proses Selesai' : 'Proses Gagal',
+                        html: `<div>
+                            <p>${successMsg}</p>
+                            ${response.error_count > 0 ?
+                                `<details><summary>Detail Error (${response.error_count})</summary>
+                                <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+                                    ${errorDetails}
+                                </div></details>` : ''}
+                        </div>`,
+                        showConfirmButton: true,
+                        confirmButtonText: 'OK'
                     });
-                } finally {
-                    // Reset button state
-                    processBtn.text('Proses').prop('disabled', false);
+                } else {
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Proses Selesai',
+                        text: successMsg
+                    });
+                }
+            }
 
-                    // Hide progress bar with a slight delay for better UX
-                    setTimeout(() => {
-                        progressBar.hide();
-                    }, 500);
+            function showErrorNotification(xhr) {
+                let errorMsg = 'Terjadi kesalahan saat memproses data. Silakan coba lagi.';
+                if (xhr.responseJSON?.message) {
+                    errorMsg = xhr.responseJSON.message;
+                }
 
-                    // Show export button if there are results
-                    if (results.length > 0) {
-                        exportBtn.show();
-                    }
+                Swal.fire({
+                    icon: 'error',
+                    title: 'Error',
+                    text: errorMsg
+                });
+            }
+            // Fungsi untuk menambahkan item ke accordion (diperbarui)
+            function addItemToAccordion(title, artist, lyric, index, status = 'success',
+                language = null, source = null, explicit = false,
+                tag = null, priority = null, done_publish = false, pic = null) {
+                let statusBadge = '';
 
-                    // Show summary if processing is complete
-                    const errorResults = results.filter(r => r.status !== 'success');
-                    const errorCount = errorResults.length;
-                    const successCount = results.length - errorCount;
+                if (status === 'success') {
+                    statusBadge = '<span class="badge bg-success ms-2">Success</span>';
+                } else if (status === 'error') {
+                    statusBadge = '<span class="badge bg-danger ms-2">Error</span>';
+                }
 
-                    if (results.length > 0) {
-                        // Count errors by type
-                        const errorByTypes = {
-                            'not_found': results.filter(r => r.status === 'not_found' || r.status === 'not-found').length,
-                            'api_error': results.filter(r => r.status === 'api_error' || r.status === 'api-error').length,
-                            'connection': results.filter(r => r.status === 'connection').length,
-                            'database': results.filter(r => r.status === 'database').length,
-                            'general': results.filter(r => r.status === 'general' || r.status === 'error').length
-                        };
+                // Format priority badge
+                let priorityBadge = '';
+                if (priority) {
+                    const priorityText =
+                        priority == 1 ? 'Normal' :
+                            priority == 2 ? 'High' :
+                                priority == 3 ? 'Urgent' : '';
+                    const priorityClass =
+                        priority == 1 ? 'bg-secondary' :
+                            priority == 2 ? 'bg-warning' :
+                                priority == 3 ? 'bg-danger' : '';
+                    priorityBadge = `<span class="badge ${priorityClass} ms-2">${priorityText}</span>`;
+                }
 
-                        // Create summary message
-                        let summaryHtml = `
-                                                    <div class="text-start">
-                                                        <h5>Summary:</h5>
-                                                        <ul>
-                                                            <li class="text-success">Successfully scraped: ${successCount} songs</li>
-                                                `;
-
-                        // Only show error types that exist
-                        if (errorByTypes.not_found > 0) {
-                            summaryHtml += `<li class="text-warning">Not found: ${errorByTypes.not_found} songs</li>`;
-                        }
-                        if (errorByTypes.api_error > 0) {
-                            summaryHtml += `<li class="text-danger">API errors: ${errorByTypes.api_error} songs</li>`;
-                        }
-                        if (errorByTypes.connection > 0) {
-                            summaryHtml += `<li class="text-danger">Connection errors: ${errorByTypes.connection} songs</li>`;
-                        }
-                        if (errorByTypes.database > 0) {
-                            summaryHtml += `<li class="text-danger">Database errors: ${errorByTypes.database} songs</li>`;
-                        }
-                        if (errorByTypes.general > 0) {
-                            summaryHtml += `<li class="text-danger">Other errors: ${errorByTypes.general} songs</li>`;
-                        }
-
-                        summaryHtml += `
-                                                        </ul>
-                                                        ${errorCount > 0 ? '<p>Please check the details for each song with errors below.</p>' : ''}
+                const item = `
+                                                    <div class="accordion-item" id="accordion-item-${index}">
+                                                        <h2 class="accordion-header" id="heading${index}">
+                                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                                                data-bs-target="#collapse${index}" aria-expanded="false" 
+                                                                aria-controls="collapse${index}">
+                                                                <strong>${title}</strong> - ${artist} ${statusBadge}
+                                                                ${priorityBadge}
+                                                            </button>
+                                                        </h2>
+                                                        <div id="collapse${index}" class="accordion-collapse collapse" 
+                                                            aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
+                                                            <div class="accordion-body">
+                                                                <div class="mb-2">
+                                                                    <strong>Language:</strong>
+                                                                    <span class="badge bg-info">${language || 'Unknown'}</span>
+                                                                    <strong>Source:</strong>
+                                                                    <span class="badge bg-secondary">${source || 'Unknown'}</span>
+                                                                    <strong>Explicit:</strong>
+                                                                    <span class="badge bg-warning">${explicit ? 'Yes' : 'No'}</span>
+                                                                    <strong>Tag:</strong>
+                                                                    <span class="badge bg-primary">${tag || 'Unknown'}</span>
+                                                                    <strong>PIC:</strong>
+                                                                    <span class="badge bg-info">${pic || 'Unknown'}</span>
+                                                                    <strong>Done Check:</strong>
+                                                                    <span class="badge ${done_publish ? 'bg-success' : 'bg-secondary'}">${done_publish ? 'Yes' : 'No'}</span>
+                                                                    <button class="btn btn-danger btn-sm float-end delete-btn" data-id="${index}">
+                                                                        <i class="bi bi-trash"></i>
+                                                                    </button>
+                                                                </div>
+                                                                <pre style="white-space: pre-wrap;">${lyric}</pre>
+                                                            </div>
+                                                        </div>
                                                     </div>
                                                 `;
+                lyricsAccordion.append(item);
+            }
 
-                        // Display summary
-                        Swal.fire({
-                            icon: errorCount > 0 ? 'info' : 'success',
-                            title: 'Proses Selesai',
-                            html: summaryHtml
+            // Delete button functionality
+            deleteBtn.click(async function (e) {
+                const lyricId = $(this).data('id'); // Ambil ID lirik dari atribut data-id
+                const accordionItem = $(this).closest('.accordion-item'); // Ambil elemen accordion item
+
+                // Tampilkan konfirmasi sebelum menghapus
+                Swal.fire({
+                    title: 'Konfirmasi Hapus',
+                    text: "Apakah Anda yakin ingin menghapus lirik ini?",
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Ya, Hapus',
+                    cancelButtonText: 'Batal'
+                }).then((result) => {
+                    if (result.isConfirmed) {
+                        // Kirim permintaan DELETE ke server
+                        $.ajax({
+                            url: `/lyrics/scraper/delete/${lyricId}`, // Endpoint untuk delete
+                            type: 'DELETE',
+                            headers: {
+                                'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content') // Tambahkan CSRF token
+                            },
+                            success: function (response) {
+                                if (response.success) {
+                                    // Hapus item dari accordion
+                                    accordionItem.remove();
+
+                                    // Tampilkan pesan sukses
+                                    Swal.fire('Terhapus!', response.message, 'success');
+                                } else {
+                                    // Tampilkan pesan error jika gagal
+                                    Swal.fire('Gagal!', response.message, 'error');
+                                }
+                            },
+                            error: function (xhr) {
+                                // Tampilkan pesan error jika terjadi kesalahan
+                                Swal.fire('Error!', 'Terjadi kesalahan saat menghapus lirik.', 'error');
+                            }
                         });
                     }
-                }
+                });
             });
 
             // Function to determine if the input is likely in "Artist, Title" format

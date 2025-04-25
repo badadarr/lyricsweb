@@ -19,6 +19,11 @@ class Lyric extends Model
         'lyric',
         'explicit',
         'language',
+        'tag',
+        'source',
+        'priority',
+        'pic',
+        'done_publish',
         'project_name',
     ];
 

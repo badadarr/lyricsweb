@@ -7,13 +7,12 @@ use App\Models\ProjectLyric;
 use GuzzleHttp\Client;
 use GuzzleHttp\Exception\RequestException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Cell\DataValidation;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
-use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
-use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Yajra\DataTables\DataTables;
 
@@ -153,244 +152,172 @@ class LyricsScraperController extends Controller
         }
     }
 
-        public function processScrapeLyric(Request $request)
+    public function storeScrapeLyric(Request $request)
     {
-        try {
-            // Log incoming request
-            Log::info('Scrape request received:', [
-                'title' => $request->query('title'),
-                'artist' => $request->query('artist'),
-                'project_name' => $request->query('project_name')
-            ]);
+        $request->validate([
+            'tag' => 'nullable|string|max:255',
+            'pic' => 'nullable|string|max:255',
+            'done_check' => 'required|boolean',
+            'priority' => 'required|integer|in:1,2,3',
+            'bulk_input' => 'required|string',
+            'project_name' => 'required|string|max:255',
+        ]);
 
-            // Validasi input
-            $title = $request->query('title');
-            $artist = $request->query('artist');
-            $project_name = $request->query('project_name');
+        $bulkInput = explode("\n", $request->bulk_input);
+        $lyrics = [];
+        $successCount = 0;
+        $errorCount = 0;
+        $errors = [];
 
-            if (empty($title) || empty($artist)) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Title and artist are required.',
-                    'error_type' => 'validation'
-                ], 400);
+        foreach ($bulkInput as $line) {
+            $line = trim($line);
+            if (empty($line))
+                continue;
+
+            $parts = explode(',', $line);
+            if (count($parts) < 2) {
+                $errors[] = "Invalid format for line: '$line'. Format should be 'Title, Artist'";
+                $errorCount++;
+                continue;
             }
 
-            // Validate project exists
-            $project = ProjectLyric::where('project_name', $project_name)
-                ->whereNull('deleted_at')
-                ->first();
+            $title = trim($parts[0]);
+            $artist = trim($parts[1]);
 
-            if (!$project) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Project not found.',
-                    'error_type' => 'not_found',
-                    'details' => [
-                        'requested_project' => $project_name
-                    ]
-                ], 404);
-            }
-
-            // Check if lyric already exists in database to avoid duplicate scraping
-            $existingLyric = Lyric::where('title', $title)
-                ->where('artist', $artist)
-                ->where('project_name', $project_name)
-                ->first();
-
-            if ($existingLyric) {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Lyrics already in database.',
-                    'data' => [
-                        'title' => $existingLyric->title,
-                        'artist' => $existingLyric->artist,
-                        'lyric' => $existingLyric->lyric,
-                        'language' => $existingLyric->language,
-                        'explicit' => $existingLyric->explicit,
-                        'project_name' => $existingLyric->project_name,
-                        'source' => 'database'
-                    ]
-                ]);
-            }
-
-            // Konfigurasi client with better error handling
-            $client = new Client([
-                'timeout' => 480, // 8 menit
-                'connect_timeout' => 120, // 2 menit untuk koneksi awal
-                'verify' => false,
-                'http_errors' => false,
-            ]);
-
-            // http://143.198.192.199:3000/lyrics
-            // http://localhost:3000/lyrics
-            $API_URL_PUBLISH = 'http://143.198.192.199:3000/lyrics';
-            $API_URL_LOCAL = 'http://localhost:3000/lyrics';
             try {
-                $response = $client->get($API_URL_LOCAL, [
-                    'query' => [
-                        'title' => $title,
-                        'artist' => $artist
-                    ]
+                // Check if lyric already exists
+                $existingLyric = Lyric::where('title', $title)
+                    ->where('artist', $artist)
+                    ->where('project_name', $request->project_name)
+                    ->first();
+
+                if ($existingLyric) {
+                    $lyrics[] = $existingLyric;
+                    $successCount++;
+                    continue;
+                }
+
+                // Scrape lyrics from API
+                $scrapedData = $this->scrapeLyrics($title, $artist);
+
+                if (!$scrapedData['success']) {
+                    $errors[] = "Failed to scrape lyrics for '$title - $artist': " . $scrapedData['message'];
+                    $errorCount++;
+                    continue;
+                }
+
+                // Save to database
+                $lyric = Lyric::create([
+                    'title' => $title,
+                    'artist' => $artist,
+                    'lyric' => $scrapedData['data']['lyric'],
+                    'language' => $scrapedData['data']['language'] ?? null,
+                    'explicit' => $scrapedData['data']['explicit'] ?? false,
+                    'source' => $scrapedData['data']['source'] ?? null,
+                    'project_name' => $request->project_name,
+                    'tag' => $request->tag,
+                    'priority' => $request->priority,
+                    'done_publish' => $request->done_check,
+                    'pic' => $request->pic,
                 ]);
 
-                // Handle different status codes with specific error messages
-                if ($response->getStatusCode() === 404) {
-                    Log::warning('Lyrics not found:', [
-                        'title' => $title,
-                        'artist' => $artist
-                    ]);
+                $lyrics[] = $lyric;
+                $successCount++;
+            } catch (\Exception $e) {
+                $errors[] = "Error processing '$title - $artist': " . $e->getMessage();
+                $errorCount++;
+                Log::error("Error processing lyric", [
+                    'title' => $title,
+                    'artist' => $artist,
+                    'error' => $e->getMessage()
+                ]);
+            }
+        }
 
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Lyrics not found for this song.',
-                        'error_type' => 'not_found',
-                        'details' => [
-                            'title' => $title,
-                            'artist' => $artist
-                        ]
-                    ], 404);
-                } else if ($response->getStatusCode() !== 200) {
-                    Log::error('API returned error status code:', [
-                        'status' => $response->getStatusCode(),
-                        'title' => $title,
-                        'artist' => $artist
-                    ]);
+        return response()->json([
+            'success' => $successCount > 0,
+            'message' => $successCount > 0 ?
+                "Successfully processed $successCount songs" . ($errorCount > 0 ? ", with $errorCount errors" : "") :
+                "Failed to process any songs",
+            'data' => $lyrics,
+            'errors' => $errors,
+            'success_count' => $successCount,
+            'error_count' => $errorCount
+        ]);
+    }
 
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Error from lyrics API service.',
-                        'error_type' => 'api_error',
-                        'details' => [
-                            'title' => $title,
-                            'artist' => $artist,
-                            'status_code' => $response->getStatusCode()
-                        ]
-                    ], 500);
-                }
+    private function scrapeLyrics($title, $artist)
+    {
+        // Konfigurasi client with better error handling
+        $client = new Client([
+            'timeout' => 480, // 8 menit
+            'connect_timeout' => 120, // 2 menit untuk koneksi awal
+            'verify' => false,
+            'http_errors' => false,
+        ]);
 
-                $data = json_decode($response->getBody(), true);
+        // API_URL_SERVER = http://170.64.233.37:3000/lyrics
+        // API_URL_LOCAL = htttp://localhost:3000/lyrics
 
-                // Validate API response structure
-                if (!isset($data) || !is_array($data)) {
-                    Log::error('Invalid API response format:', [
-                        'title' => $title,
-                        'artist' => $artist,
-                        'response' => (string) $response->getBody()
-                    ]);
-
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Invalid response from lyrics API.',
-                        'error_type' => 'api_format',
-                        'details' => [
-                            'title' => $title,
-                            'artist' => $artist
-                        ]
-                    ], 500);
-                }
-
-                // Check if lyrics exist in response
-                if (!isset($data['lyrics']) || empty($data['lyrics'])) {
-                    Log::warning('No lyrics found in API response:', [
-                        'title' => $title,
-                        'artist' => $artist
-                    ]);
-
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Lyrics not available for this song.',
-                        'error_type' => 'empty_lyrics',
-                        'details' => [
-                            'title' => $title,
-                            'artist' => $artist
-                        ]
-                    ], 404);
-                }
-
-                // Extract language info
-                $language = isset($data['lyrics']['language']) ? $data['lyrics']['language'] : 'Unknown';
-                $explicit = isset($data['lyrics']['explicit']) ? $data['lyrics']['explicit'] : false;
-                $source = isset($data['source']) ? $data['source'] : 'Unknown'; // Extract source
-
-                // Save to database with transaction
-                try {
-                    $lyric = new Lyric([
-                        'title' => $title,
-                        'artist' => $artist,
-                        'lyric' => $data['lyrics']['lyrics'],
-                        'language' => $language,
-                        'explicit' => $explicit,
-                        'project_name' => $project->project_name,
-                        'source' => $source // Save source to database
-                    ]);
-
-                    $project->lyrics()->save($lyric);
-
-                    return response()->json([
-                        'success' => true,
-                        'message' => 'Lyrics successfully scraped and saved.',
-                        'data' => [
-                            'title' => $title,
-                            'artist' => $artist,
-                            'lyric' => $data['lyrics']['lyrics'],
-                            'language' => $language,
-                            'explicit' => $explicit,
-                            'project_name' => $project->project_name,
-                            'source' => $source // Return source in response
-                        ],
-                    ]);
-                } catch (\Exception $e) {
-                    Log::error('Database error saving lyrics:', [
-                        'error' => $e->getMessage(),
-                        'title' => $title,
-                        'artist' => $artist
-                    ]);
-
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Error saving lyrics to database.',
-                        'error_type' => 'database',
-                        'details' => [
-                            'title' => $title,
-                            'artist' => $artist
-                        ]
-                    ], 500);
-                }
-            } catch (RequestException $e) {
-                Log::error('API connection error:', [
-                    'error' => $e->getMessage(),
+        try {
+            $response = $client->get('http://170.64.233.37:3000/lyrics', [
+                'query' => [
                     'title' => $title,
                     'artist' => $artist
-                ]);
-
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Failed to connect to lyrics API service.',
-                    'error_type' => 'connection',
-                    'details' => [
-                        'title' => $title,
-                        'artist' => $artist,
-                        'error' => $e->getMessage()
-                    ]
-                ], 503);
-            }
-        } catch (\Exception $e) {
-            Log::error('Unexpected error:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                ]
             ]);
+
+            if ($response->getStatusCode() !== 200) {
+                return [
+                    'success' => false,
+                    'message' => 'API returned status code ' . $response->getStatusCode()
+                ];
+            }
+
+            $data = json_decode($response->getBody(), true);
+
+            if (!isset($data['lyrics']) || empty($data['lyrics']['lyrics'])) {
+                return [
+                    'success' => false,
+                    'message' => 'No lyrics found in API response'
+                ];
+            }
+
+            return [
+                'success' => true,
+                'data' => [
+                    'lyric' => $data['lyrics']['lyrics'],
+                    'language' => $data['lyrics']['language'] ?? null,
+                    'explicit' => $data['lyrics']['explicit'] ?? false,
+                    'source' => $data['source'] ?? null
+                ]
+            ];
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
+            ];
+        }
+    }
+
+
+    public function deleteScrapeLyric($id)
+    {
+        try {
+            $lyric = Lyric::findOrFail($id);
+            $lyric->delete();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Lyric deleted successfully.'
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error deleting lyric:', ['error' => $e->getMessage()]);
 
             return response()->json([
                 'success' => false,
-                'message' => 'An unexpected error occurred.',
-                'error_type' => 'system',
-                'details' => [
-                    'title' => $title ?? 'unknown',
-                    'artist' => $artist ?? 'unknown',
-                    'error' => $e->getMessage(), // Tambahkan pesan error
-                    'trace' => $e->getTraceAsString() // Tambahkan trace error (opsional)
-                ]
+                'message' => 'Error deleting lyric.',
+                'error' => $e->getMessage()
             ], 500);
         }
     }
@@ -419,6 +346,8 @@ class LyricsScraperController extends Controller
         // Daftar bahasa yang valid
         $validLanguages = ['ID', 'EN', 'KR', 'JP']; // Ganti dengan daftar bahasa Anda
 
+        $currentUser = Auth::user()->name; // Ambil nama user yang sedang login
+
         $row = 2; // Data dimulai dari baris kedua (baris pertama adalah header)
         foreach ($lyrics as $lyric) {
             $sheet->setCellValue("A{$row}", trim($lyric->title));
@@ -426,30 +355,18 @@ class LyricsScraperController extends Controller
             $sheet->setCellValue("C{$row}", trim($lyric->lyric));
             $sheet->setCellValue("D{$row}", strtoupper(trim($lyric->language)));
             $sheet->setCellValue("E{$row}", $lyric->explicit ? 1 : 0); // Set 1 if true, 0 if false
-            $sheet->setCellValue("F{$row}", ''); // Tag (kosong)
-            $sheet->setCellValue("G{$row}", ''); // Priority (kosong)
-            $sheet->setCellValue("H{$row}", ''); // Done Check (kosong)
-            $sheet->setCellValue("I{$row}", ''); // PIC (kosong)
+            $sheet->setCellValue("F{$row}", $lyric->tag ?? 'Kosong'); // Tag
+            $sheet->setCellValue("G{$row}", $lyric->priority ?? 0); // Prioritas
+            $sheet->setCellValue("H{$row}", $lyric->done_publish ? 1 : 0); // Done check
+            $sheet->setCellValue("I{$row}", $currentUser);
             $sheet->setCellValue("J{$row}", ''); // Done Publish (kosong)
-            $sheet->setCellValue("K{$row}", $lyric->created_at->format('Y-m-d')); // Tanggal Publish
+            $sheet->setCellValue("K{$row}", ''); // Tanggal Publish (Kosong)
 
             // Memastikan lirik tetap rapi dengan wrap text
             $sheet->getStyle("C{$row}")->getAlignment()->setWrapText(true);
             $sheet->getStyle("C{$row}")->getAlignment()->setVertical(Alignment::VERTICAL_TOP);
             $sheet->getStyle("C{$row}")->getAlignment()->setHorizontal(Alignment::HORIZONTAL_LEFT);
 
-            // Data validation untuk kolom language
-            $validation = $sheet->getDataValidation("D{$row}");
-            $validation->setType(DataValidation::TYPE_LIST);
-            $validation->setErrorStyle(DataValidation::STYLE_INFORMATION);
-            $validation->setAllowBlank(false);
-            $validation->setShowInputMessage(true);
-            $validation->setShowErrorMessage(true);
-            $validation->setPromptTitle('Select Language');
-            $validation->setPrompt('Please select a language from the list.');
-            $validation->setErrorTitle('Invalid Input');
-            $validation->setError('Please select a valid language from the dropdown list.');
-            $validation->setFormula1('"' . implode(',', $validLanguages) . '"');
 
             Log::info("Writing row {$row}: ", [
                 'title' => $lyric->title,

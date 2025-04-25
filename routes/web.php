@@ -25,6 +25,14 @@ Route::middleware('auth')->group(function () {
     Route::get('/lyrics/scraper/process', [LyricsScraperController::class, 'processScrapeLyric'])
         ->name('lyrics-scraper.process');
 
+    // Proses store input scraper
+    Route::post('/lyrics/scraper/store', [LyricsScraperController::class, 'storeScrapeLyric'])
+        ->name('lyrics-scraper.store');
+
+    // Delete Scraping Route
+    Route::delete('/lyrics/scraper/delete/{id}', [LyricsScraperController::class, 'deleteScrapeLyric'])
+        ->name('lyrics-scraper.delete');
+
 
     // Export CSV Route
     Route::get('/lyrics/export/{project_name}', [LyricsScraperController::class, 'exportCsv'])->name('lyrics.export');

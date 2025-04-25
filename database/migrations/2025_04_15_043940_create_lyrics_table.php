@@ -21,6 +21,10 @@ return new class extends Migration {
             $table->string('language')->nullable(); // Kolom baru untuk bahasa
             $table->boolean('explicit')->default(false); // Kolom baru untuk konten dewasa
             $table->string('source')->nullable(); // Kolom baru untuk sumber lagu
+            $table->string('tag')->nullable(); // Kolom baru untuk tag
+            $table->boolean('priority')->default(false); // Kolom baru untuk prioritas
+            $table->string('pic')->nullable(); // Kolom baru untuk nama PIC
+            $table->boolean('done_publish')->default(false); // Kolom baru untuk status publish
             $table->softDeletes(); // Kolom deleted_at untuk soft delete
             $table->timestamps();
             // Foreign key constraints
