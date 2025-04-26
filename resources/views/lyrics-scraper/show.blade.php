@@ -107,7 +107,7 @@
             processModalBtn.after(progressBar);
 
             // Handle tombol proses di modal
-            $('#processModalBtn').click(function (e) {
+            processModalBtn.click(function (e) {
                 e.preventDefault();
 
                 const bulkInput = $('#bulkInputModal').val().trim();
@@ -134,48 +134,57 @@
                     $('#inputModal').modal('hide');
                     showProgressBar();
 
+                    let simulatedProgress = 10; // Mulai dari 10%
+                    const interval = setInterval(() => {
+                        if (simulatedProgress < 90) { // Simulasi hingga 90%
+                            simulatedProgress += 5; // Tambahkan 5% setiap interval
+                            updateProgressBar(simulatedProgress, 'Memproses data...');
+                        } else {
+                            clearInterval(interval); // Hentikan simulasi jika mencapai 90%
+                        }
+                    }, 500); // Interval 500ms
+
                     // Kirim data ke server
                     $.ajax({
-                        url: $('#addLyricsForm').attr('action'),
+                        url: addLyricsForm.attr('action'),
                         method: 'POST',
-                        data: $('#addLyricsForm').serialize(),
+                        data: addLyricsForm.serialize(),
                         headers: {
                             'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')
-                        },
-                        xhr: function () {
-                            const xhr = new window.XMLHttpRequest();
-                            xhr.addEventListener('progress', function (e) {
-                                if (e.lengthComputable) {
-                                    const percent = Math.round((e.loaded / e.total) * 90);
-                                    updateProgressBar(percent, 'Mengunggah data...');
-                                }
-                            });
-                            return xhr;
                         },
                         beforeSend: function () {
                             updateProgressBar(10, 'Memulai proses...');
                         },
                         success: function (response) {
+                            clearInterval(interval); // Hentikan simulasi jika mencapai 90%
                             updateProgressBar(100, 'Proses selesai!');
+
+                            let successCount = 0;
+                            let errorCount = 0;
 
                             // Tambahkan hasil ke accordion
                             if (response.data && response.data.length > 0) {
                                 const existingCount = $('.accordion-item').length;
                                 response.data.forEach((lyric, index) => {
-                                    addItemToAccordion(
-                                        lyric.title,
-                                        lyric.artist,
-                                        lyric.lyric,
-                                        existingCount + index,
-                                        'success',
-                                        lyric.language,
-                                        lyric.source,
-                                        lyric.explicit,
-                                        lyric.tag,
-                                        lyric.priority,
-                                        lyric.done_publish,
-                                        lyric.pic
-                                    );
+                                    if (lyric.status === 'success') {
+                                        successCount++;
+                                        addItemToAccordion(
+                                            lyric.title,
+                                            lyric.artist,
+                                            lyric.lyric,
+                                            existingCount + index,
+                                            'success',
+                                            lyric.language,
+                                            lyric.source,
+                                            lyric.explicit,
+                                            lyric.tag,
+                                            lyric.priority,
+                                            lyric.done_publish,
+                                            lyric.pic
+                                        );
+                                    } else {
+                                        errorCount++;
+                                    }
                                 });
                             }
 
@@ -183,6 +192,7 @@
                             showResultNotification(response);
                         },
                         error: function (xhr) {
+                            clearInterval(interval); // Hentikan simulasi jika mencapai 90%
                             updateProgressBar(0, 'Error terjadi!');
                             showErrorNotification(xhr);
                         },
@@ -200,8 +210,8 @@
             }
 
             function updateProgressBar(percent, text) {
-                progressBar.css('width', percent + '%');
-                if (text) progressText.text(text);
+                progressBar.css('width', percent + '%'); // Perbarui lebar progress bar
+                if (text) progressText.text(text); // Perbarui teks progress
             }
 
             function hideProgressBar() {
@@ -226,18 +236,24 @@
                             <p>${successMsg}</p>
                             ${response.error_count > 0 ?
                                 `<details><summary>Detail Error (${response.error_count})</summary>
-                                <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
-                                    ${errorDetails}
-                                </div></details>` : ''}
+                                    <div style="max-height: 200px; overflow-y: auto; margin-top: 10px;">
+                                        ${errorDetails}
+                                    </div></details>` : ''}
                         </div>`,
                         showConfirmButton: true,
                         confirmButtonText: 'OK'
+                    }).then(() => {
+                        // Refresh halaman setelah notifikasi ditutup
+                        location.reload();
                     });
                 } else {
                     Swal.fire({
                         icon: 'success',
                         title: 'Proses Selesai',
                         text: successMsg
+                    }).then(() => {
+                        // Refresh halaman setelah notifikasi ditutup
+                        location.reload();
                     });
                 }
             }
@@ -281,43 +297,42 @@
                 }
 
                 const item = `
-                                                    <div class="accordion-item" id="accordion-item-${index}">
-                                                        <h2 class="accordion-header" id="heading${index}">
-                                                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
-                                                                data-bs-target="#collapse${index}" aria-expanded="false" 
-                                                                aria-controls="collapse${index}">
-                                                                <strong>${title}</strong> - ${artist} ${statusBadge}
-                                                                ${priorityBadge}
-                                                            </button>
-                                                        </h2>
-                                                        <div id="collapse${index}" class="accordion-collapse collapse" 
-                                                            aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
-                                                            <div class="accordion-body">
-                                                                <div class="mb-2">
-                                                                    <strong>Language:</strong>
-                                                                    <span class="badge bg-info">${language || 'Unknown'}</span>
-                                                                    <strong>Source:</strong>
-                                                                    <span class="badge bg-secondary">${source || 'Unknown'}</span>
-                                                                    <strong>Explicit:</strong>
-                                                                    <span class="badge bg-warning">${explicit ? 'Yes' : 'No'}</span>
-                                                                    <strong>Tag:</strong>
-                                                                    <span class="badge bg-primary">${tag || 'Unknown'}</span>
-                                                                    <strong>PIC:</strong>
-                                                                    <span class="badge bg-info">${pic || 'Unknown'}</span>
-                                                                    <strong>Done Check:</strong>
-                                                                    <span class="badge ${done_publish ? 'bg-success' : 'bg-secondary'}">${done_publish ? 'Yes' : 'No'}</span>
-                                                                    <button class="btn btn-danger btn-sm float-end delete-btn" data-id="${index}">
-                                                                        <i class="bi bi-trash"></i>
-                                                                    </button>
-                                                                </div>
-                                                                <pre style="white-space: pre-wrap;">${lyric}</pre>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                `;
+                                                                            <div class="accordion-item" id="accordion-item-${index}">
+                                                                                <h2 class="accordion-header" id="heading${index}">
+                                                                                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" 
+                                                                                        data-bs-target="#collapse${index}" aria-expanded="false" 
+                                                                                        aria-controls="collapse${index}">
+                                                                                        <strong>${title}</strong> - ${artist} ${statusBadge}
+                                                                                        ${priorityBadge}
+                                                                                    </button>
+                                                                                </h2>
+                                                                                <div id="collapse${index}" class="accordion-collapse collapse" 
+                                                                                    aria-labelledby="heading${index}" data-bs-parent="#lyricsAccordion">
+                                                                                    <div class="accordion-body">
+                                                                                        <div class="mb-2">
+                                                                                            <strong>Language:</strong>
+                                                                                            <span class="badge bg-info">${language || 'Unknown'}</span>
+                                                                                            <strong>Source:</strong>
+                                                                                            <span class="badge bg-secondary">${source || 'Unknown'}</span>
+                                                                                            <strong>Explicit:</strong>
+                                                                                            <span class="badge bg-warning">${explicit ? 'Yes' : 'No'}</span>
+                                                                                            <strong>Tag:</strong>
+                                                                                            <span class="badge bg-primary">${tag || 'Unknown'}</span>
+                                                                                            <strong>PIC:</strong>
+                                                                                            <span class="badge bg-info">${pic || 'Unknown'}</span>
+                                                                                            <strong>Done Check:</strong>
+                                                                                            <span class="badge ${done_publish ? 'bg-success' : 'bg-secondary'}">${done_publish ? 'Yes' : 'No'}</span>
+                                                                                            <button class="btn btn-danger btn-sm float-end delete-btn" data-id="${index}">
+                                                                                                <i class="bi bi-trash"></i>
+                                                                                            </button>
+                                                                                        </div>
+                                                                                        <pre style="white-space: pre-wrap;">${lyric}</pre>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                        `;
                 lyricsAccordion.append(item);
             }
-
             // Delete button functionality
             deleteBtn.click(async function (e) {
                 const lyricId = $(this).data('id'); // Ambil ID lirik dari atribut data-id
